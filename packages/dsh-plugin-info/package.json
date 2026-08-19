@@ -1,7 +1,7 @@
 {
   "name": "@eya46/dsh-plugin-info",
   "description": "List profile-added DSH plugins, mark available updates, and show recent version notes",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
