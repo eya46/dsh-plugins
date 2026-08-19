@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.tsbuildinfo"
+  },
+  "include": [
+    "src/http.ts",
+    "src/index.ts",
+    "src/profile.ts",
+    "src/registry.ts",
+    "src/semver.ts",
+    "src/service.ts",
+    "src/types.ts"
+  ]
+}

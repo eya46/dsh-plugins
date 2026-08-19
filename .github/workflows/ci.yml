@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        # Version is read from the `packageManager` field in package.json
+        # (pnpm@10.33.0). Don't pass `version:` here to avoid the
+        # "Multiple versions of pnpm specified" error.
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Pin to Node 22 LTS, matching the repo's `engines.node` floor.
+          node-version: 22.19.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r --filter "./packages/**" run typecheck
+
+      - name: Test
+        run: pnpm -r --filter "./packages/**" run test
+
+      - name: Build
+        run: pnpm -r --filter "./packages/**" run build

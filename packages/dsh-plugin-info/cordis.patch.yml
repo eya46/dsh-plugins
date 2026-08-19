@@ -1,0 +1,4 @@
+# Mount the plugin-info host + settings page. Config is optional.
+- insert:
+    - id: dsh-plugin-info
+      name: '@eya46/dsh-plugin-info'

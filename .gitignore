@@ -1,0 +1,13 @@
+node_modules/
+lib/
+*.tgz
+tmp/
+.npmrc
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+coverage/
+*.tsbuildinfo
