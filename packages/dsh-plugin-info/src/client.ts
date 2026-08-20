@@ -19,6 +19,13 @@ interface MinimalReact {
   useCallback<T>(fn: T, deps: unknown[]): T
 }
 
+/**
+ * Subset of DSH's `MarkdownText` shared primitive. The real component is
+ * GFM + KaTeX with unsafe HTML/protocols stripped; we only need the `text`
+ * prop for rendering release-note bodies.
+ */
+type MarkdownTextComponent = (props: { text: string }) => unknown
+
 interface SlotsService {
   inject(key: string, register: () => void): void
   register(options: Record<string, unknown>, component: unknown): void
@@ -97,13 +104,19 @@ interface VersionNotes {
       '.dpi-version:hover { background: var(--dsw-alias-interactive-bg-hover-solid); }',
       '.dpi-version[data-open="1"] { background: var(--dsw-alias-interactive-bg-hover-solid); }',
       '.dpi-notes { display: flex; flex-direction: column; gap: 6px; padding: 8px 2px 2px; }',
-      '.dpi-notesBody { margin: 0; white-space: pre-wrap; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }',
       '.dpi-commits { margin: 0; padding-left: 18px; font-size: 13px; line-height: 20px; }',
       '.dpi-link { color: inherit; text-underline-offset: 3px; }',
       '.dpi-copyTag { box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-secondary); background: transparent; border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 16px; cursor: pointer; }',
       '.dpi-copyTag:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); }',
     ].join('\n')
     const React = require('react') as MinimalReact
+    // Reuse DSH's shared untrusted-Markdown renderer instead of rolling our
+    // own — it ships in the web shell's static module table and handles GFM,
+    // math, code fences, and sanitization (raw HTML / unsafe URLs stripped).
+    const uiPrimitives = require('@deepseek-ai/dsh-client-ui-primitives') as {
+      MarkdownText: MarkdownTextComponent
+    }
+    const MarkdownText = uiPrimitives.MarkdownText
     const h = React.createElement.bind(React)
 
     const ensureStyles = (): void => {
@@ -341,7 +354,9 @@ interface VersionNotes {
                   noteChildren.push(h('p', { key: 'nmiss', className: 'dpi-meta' }, '没有更新说明。'))
                 } else if (note.source === 'github-release') {
                   if (note.title !== undefined) noteChildren.push(h('p', { key: 'nt', className: 'dpi-meta' }, note.title))
-                  if (note.body !== undefined) noteChildren.push(h('pre', { key: 'nb', className: 'dpi-notesBody' }, note.body))
+                  if (note.body !== undefined && note.body !== '') {
+                    noteChildren.push(h(MarkdownText, { key: 'nb', text: note.body }))
+                  }
                   if (note.url !== undefined) {
                     noteChildren.push(h('a', { key: 'nu', className: 'dpi-link', href: note.url, target: '_blank', rel: 'noreferrer' }, '在 GitHub 查看 Release'))
                   }
@@ -357,7 +372,10 @@ interface VersionNotes {
                     noteChildren.push(h('a', { key: 'ncu', className: 'dpi-link', href: note.url, target: '_blank', rel: 'noreferrer' }, '在 GitHub 比较'))
                   }
                 } else {
-                  noteChildren.push(h('p', { key: 'nnone', className: 'dpi-meta' }, note.body ?? '这个版本没有找到 GitHub Release 或提交说明。'))
+                  const fallback = note.body ?? '这个版本没有找到 GitHub Release 或提交说明。'
+                  // Error payloads and the "none" source are plain text; keep
+                  // them literal rather than feeding them through Markdown.
+                  noteChildren.push(h('p', { key: 'nnone', className: 'dpi-meta' }, fallback))
                 }
               }
               return h('div', { key: row.version },
