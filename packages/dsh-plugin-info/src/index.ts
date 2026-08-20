@@ -42,7 +42,7 @@ export const Config: z<Config> = z.object({
   defaultVersionLimit: z.number().step(1).min(1).max(50).default(DEFAULT_VERSION_LIMIT),
   timeoutMs: z.number().step(1).min(1000).default(15_000),
   cacheTtlMs: z.number().step(1).min(0).default(5 * 60_000),
-  allowScopes: z.array(z.string()).default(['@eya46/']),
+  allowScopes: z.array(z.string()),
 })
 
 /**

@@ -303,7 +303,7 @@ interface VersionNotes {
       const updateCount = rows.filter((row) => row.hasUpdate).length
       const children: unknown[] = [
         h('h2', { key: 'title', className: 'dpi-title' }, '插件信息'),
-        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile 里 @eya46 命名空间下的插件。展开后默认看最近 10 个版本，点版本可看更新说明。'),
+        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile 里用户添加的插件（不含随发行版内置的 bundle）。展开后默认看最近 10 个版本，点版本可看更新说明。'),
         h('div', { key: 'toolbar', className: 'dpi-toolbar' },
           h('button', { className: 'dpi-secondaryButton', disabled: busy, onClick: () => { load() } }, busy ? '刷新中…' : '刷新'),
           h('span', { className: 'dpi-status' }, '共 ' + rows.length + ' 个插件' + (updateCount > 0 ? ' · ' + updateCount + ' 个可更新' : '')),

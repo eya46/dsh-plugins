@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { Config } from '../src/index.ts'
 import { PluginInfoService } from '../src/service.ts'
 import type { JsonFetcher } from '../src/service.ts'
 
@@ -30,6 +31,10 @@ async function writeProfile(files: Record<string, unknown>): Promise<string> {
 }
 
 describe('PluginInfoService', () => {
+  it('does not apply a scope allow-list by default', () => {
+    expect(Config({}).allowScopes).toEqual([])
+  })
+
   it('lists user plugins and marks a registry update', async () => {
     const profileDir = await writeProfile({
       'dsh-better-sidebar': {

@@ -2,7 +2,7 @@
 
 面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的插件信息页。包名 `@eya46/dsh-plugin-info`，挂到当前 Profile 后，设置里会出现「插件信息」分区。
 
-它只看 **Profile 用户自己加的插件**（`profiles/<name>/package.json` 的 `dependencies`），不把 `@deepseek-ai/dsh-base` 这类随发行版带的 bundle 算进去。默认仅展示 `@eya46/` 命名空间下的插件（见下方 `allowScopes`），可按需放开。
+它只看 **Profile 用户自己加的插件**（`profiles/<name>/package.json` 的 `dependencies`），不把 `@deepseek-ai/dsh-base` 这类随发行版带的 bundle 算进去。默认展示全部用户插件；如需只看特定命名空间，可配置 `allowScopes`。
 
 - 列出已安装插件、当前版本、来源（npm / 本地 / git）
 - 对 registry 安装的包对照 `dist-tags.latest`，标出可更新
@@ -47,7 +47,7 @@ dsh plugin --profile web add "file:./packages/dsh-plugin-info"
 | `defaultVersionLimit` | `10` | 默认版本条数 |
 | `timeoutMs` | `15000` | 注册表 / GitHub 超时 |
 | `cacheTtlMs` | `300000` | packument 与说明缓存 |
-| `allowScopes` | `['@eya46/']` | 名称前缀白名单；为空数组时展示全部用户插件 |
+| `allowScopes` | 无（展示全部） | 名称前缀白名单；省略或为空数组时展示全部用户插件 |
 
 覆盖写在 Profile 的 `cordis.patch.yml`：
 

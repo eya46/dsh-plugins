@@ -97,9 +97,10 @@ export interface PluginConfig {
   /** How long packument and notes stay cached. */
   cacheTtlMs: number
   /**
-   * Optional allow-list: when non-empty, only plugins whose npm name starts
-   * with one of these prefixes (case-insensitive, e.g. `@eya46/`) appear in
-   * the settings page and the version/notes APIs. Set to `[]` to show all.
+   * Optional allow-list: when omitted or empty, all profile-added plugins
+   * appear in the settings page and the version/notes APIs. When non-empty,
+   * only plugins whose npm name starts with one of these prefixes appear
+   * (case-insensitive, e.g. `@eya46/`).
    */
-  allowScopes: string[]
+  allowScopes?: string[]
 }
