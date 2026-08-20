@@ -11,6 +11,12 @@
 
 实现方式对齐 [dsh-model-meta-autofill](https://github.com/QJAG1024/dsh-model-meta-autofill)：Host 注册本机 HTTP API，Client half 通过 `dsh.client` 挂到 `settings.section`。
 
+### 可选：dsh-better-sidebar 标签页
+
+若 Profile 同时安装了 [`dsh-better-sidebar`](https://github.com/omdsh-dev/DSH-better-sidebar) (≥0.4.0)，本插件会自动在侧边栏 `+` 菜单里多注册一个**插件信息**标签页（id `@eya46/dsh-plugin-info`，order 90，单实例），内容与设置页完全一致——侧边栏较窄，内部已做滚动/宽度适配。
+
+实现是**软依赖**：不写 `peerDependencies`，不 `import 'dsh-better-sidebar'`，只用 Cordis 的 `ctx.inject(['betterSidebar'], ...)` 开一个子 fiber——未安装时回调永不触发，其他功能不受影响；禁用 / HMR 任一插件时 disposer 随各自 fiber 清理，不会残留 `"already registered"`。
+
 ## 安装
 
 在仓库根目录构建后，把它加进当前 Profile：

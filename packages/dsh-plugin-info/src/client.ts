@@ -30,10 +30,28 @@ interface SlotsService {
   inject(key: string, register: () => void): void
   register(options: Record<string, unknown>, component: unknown): void
 }
+
+/**
+ * Minimal structural mirror of dsh-better-sidebar's client service — the
+ * only method we call is `registerTab`. The plugin is an OPTIONAL soft
+ * dependency: this plugin does not value-import it, does not list it in
+ * peerDependencies, and reaches the service through `ctx.inject(...)` so
+ * the whole registration block is inert when better-sidebar is absent.
+ */
+interface BetterSidebarServiceLike {
+  registerTab(descriptor: Record<string, unknown>): () => void
+}
+
 interface ClientContext {
   slots: SlotsService
   /** Cordis fiber-lifetime effect: runs now, disposes on fiber unload. */
   effect(callback: () => (() => void) | void, label?: string): () => void
+  /**
+   * Cordis child-fiber spawn: waits until all named services are available
+   * before running the callback. Used to register with better-sidebar only
+   * when that plugin is loaded (optional soft dependency).
+   */
+  inject(deps: string[], apply: (ctx: ClientContext) => void): unknown
 }
 
 interface PluginRow {
@@ -108,6 +126,15 @@ interface VersionNotes {
       '.dpi-link { color: inherit; text-underline-offset: 3px; }',
       '.dpi-copyTag { box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-secondary); background: transparent; border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 16px; cursor: pointer; }',
       '.dpi-copyTag:hover { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); }',
+      // Sidebar tab wrapper: the panel sits in a narrow right-side column
+      // (default 420px), where PluginInfoPanel's 720px max-width and
+      // non-scrolling body would overflow. Force full width + own scroll.
+      '.dpi-sidebar { box-sizing: border-box; width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; padding: 12px 14px 16px; background: var(--dsw-alias-bg-base); }',
+      '.dpi-sidebar .dpi-section { max-width: none; gap: 10px; }',
+      '.dpi-sidebar .dpi-card .dpi-head { padding: 10px 12px; }',
+      '.dpi-sidebar .dpi-card .dpi-body { padding: 0 12px 12px; }',
+      '.dpi-sidebar .dpi-actions { gap: 6px; }',
+      '.dpi-sidebar .dpi-rowButton { height: 26px; padding: 0 8px; }',
     ].join('\n')
     const React = require('react') as MinimalReact
     // Reuse DSH's shared untrusted-Markdown renderer instead of rolling our
@@ -403,6 +430,54 @@ interface VersionNotes {
       return h('div', { className: 'dpi-section' }, ...children)
     }
 
+    /**
+     * Sidebar-tab wrapper: same content as the settings panel, but hosted in
+     * the narrow right-side better-sidebar pane where it must manage its own
+     * vertical scroll and drop the 720px max-width.
+     */
+    const PluginInfoSidebarPanel = (): unknown => {
+      return h('div', { className: 'dpi-sidebar' }, h(PluginInfoPanel, null))
+    }
+
+    /** Small Cordis-plugin outline glyph (same geometry as the settings
+     *  nav uses, suitable for the sidebar's 16px tab icon slot). */
+    const PluginIcon = (size: number): unknown => {
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 14 14',
+        fill: 'none',
+        'aria-hidden': true,
+      },
+        h('path', {
+          fill: 'currentColor',
+          d: 'M3.03426 5.66661L1.70084 7.00003L3.0315 8.33069L2.14762 9.21457L-0.0669245 7.00003L2.15038 4.78273L3.03426 5.66661ZM7 14.067L4.77924 11.8462L5.66313 10.9623L7 12.2992L8.33342 10.9658L9.2173 11.8496L7 14.067ZM11.8489 9.21803L10.965 8.33414L12.2992 7.00003L10.9623 5.66316L11.8462 4.77927L14.0669 7.00003L11.8489 9.21803ZM8.33066 3.03153L7 1.70087L5.66589 3.03498L4.782 2.1511L7 -0.0668945L9.21454 2.14765L8.33066 3.03153Z',
+        }),
+        h('rect', { x: 5.98535, y: 5.98535, width: 2.02942, height: 2.02942, fill: 'currentColor' }),
+      )
+    }
+
+    /**
+     * Register the sidebar tab ONLY when dsh-better-sidebar is present. The
+     * child fiber waits for the `betterSidebar` service; if that plugin is
+     * not installed the callback never runs and the rest of this plugin is
+     * unaffected. The disposer returned by registerTab is attached to the
+     * child fiber, so disabling/HMR of either side cleans up cleanly.
+     */
+    const registerSidebarTab = (ctx: ClientContext): void => {
+      ctx.inject(['betterSidebar'], ((sctx: ClientContext) => {
+        const service = (sctx as unknown as { betterSidebar: BetterSidebarServiceLike }).betterSidebar
+        sctx.effect(() => service.registerTab({
+          id: '@eya46/dsh-plugin-info',
+          title: '插件信息',
+          icon: (size: number) => PluginIcon(size),
+          order: 90,
+          single: true,
+          component: PluginInfoSidebarPanel,
+        }), '@eya46/dsh-plugin-info: better-sidebar tab')
+      }) as (ctx: ClientContext) => void)
+    }
+
     return {
       name: 'dsh-plugin-info',
       inject: ['slots'],
@@ -414,6 +489,9 @@ interface VersionNotes {
             PluginInfoPanel,
           )
         })
+        // Optional injection into dsh-better-sidebar: no-op when that
+        // plugin is absent from the profile.
+        registerSidebarTab(ctx)
       },
     }
     },
