@@ -20,11 +20,25 @@ interface MinimalReact {
 }
 
 /**
- * Subset of DSH's `MarkdownText` shared primitive. The real component is
- * GFM + KaTeX with unsafe HTML/protocols stripped; we only need the `text`
- * prop for rendering release-note bodies.
+ * Subset of DSH's `MarkdownText` shared primitive (GFM + KaTeX, unsafe
+ * HTML/protocols stripped). `labels` is REQUIRED in practice: the fenced
+ * code-block renderer reads `labels.code.copyLabel` / `labels.code.copiedLabel`
+ * with no defaults, and the footnotes section reads `labels.footnotes` —
+ * passing only `text` crashes the whole settings section the moment a
+ * release note contains a fenced code block.
  */
-type MarkdownTextComponent = (props: { text: string }) => unknown
+interface MarkdownLabels {
+  code: { copyLabel: string, copiedLabel: string }
+  footnotes: string
+}
+
+type MarkdownTextComponent = (props: { text: string, labels?: MarkdownLabels }) => unknown
+
+/** Labels for the MarkdownText copy button / footnotes heading (settings UI is zh). */
+const MARKDOWN_LABELS: MarkdownLabels = {
+  code: { copyLabel: '复制代码', copiedLabel: '已复制' },
+  footnotes: '脚注',
+}
 
 interface SlotsService {
   inject(key: string, register: () => void): void
@@ -62,6 +76,7 @@ interface PluginRow {
   installedVersion?: string
   latestVersion?: string
   hasUpdate: boolean
+  updateCommand?: string
   homepage?: string
   repository?: string
   error?: string
@@ -101,12 +116,17 @@ interface VersionNotes {
       '.dpi-rowButton { height: 28px; padding: 0 10px; font-size: 12px; line-height: 18px; }',
       '.dpi-secondaryButton:hover:not(:disabled), .dpi-rowButton:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-solid); }',
       '.dpi-secondaryButton:disabled, .dpi-rowButton:disabled { opacity: 0.4; cursor: default; }',
-      '.dpi-secondaryButton:focus-visible, .dpi-rowButton:focus-visible, .dpi-head:focus-visible, .dpi-version:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--dsw-alias-border-l3); }',
+      '.dpi-secondaryButton:focus-visible, .dpi-rowButton:focus-visible, .dpi-head:focus-visible, .dpi-version:focus-visible, .dpi-updateCopy:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--dsw-alias-border-l3); }',
       '.dpi-status { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
       '.dpi-banner { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); }',
       '.dpi-empty { color: var(--dsw-alias-label-tertiary); font-size: 14px; line-height: 22px; }',
       '.dpi-cards { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }',
       '.dpi-card { border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; overflow: hidden; }',
+      '.dpi-cardTop { display: flex; align-items: stretch; gap: 0; }',
+      '.dpi-cardTop .dpi-head { flex: 1; min-width: 0; }',
+      '.dpi-updateCopy { box-sizing: border-box; flex-shrink: 0; align-self: center; height: 28px; margin: 0 12px 0 0; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l3); border-radius: 14px; background: transparent; color: var(--dsw-alias-state-warn-label); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }',
+      '.dpi-updateCopy:hover { background: var(--dsw-alias-interactive-bg-hover-solid); }',
+      '.dpi-command { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); word-break: break-all; }',
       '.dpi-head { box-sizing: border-box; width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }',
       '.dpi-head:hover { background: var(--dsw-alias-interactive-bg-hover-solid); }',
       '.dpi-name { font-size: 14px; line-height: 22px; font-weight: 500; }',
@@ -135,6 +155,7 @@ interface VersionNotes {
       '.dpi-sidebar .dpi-card .dpi-body { padding: 0 12px 12px; }',
       '.dpi-sidebar .dpi-actions { gap: 6px; }',
       '.dpi-sidebar .dpi-rowButton { height: 26px; padding: 0 8px; }',
+      '.dpi-sidebar .dpi-updateCopy { height: 26px; margin-right: 10px; padding: 0 8px; }',
     ].join('\n')
     const React = require('react') as MinimalReact
     // Reuse DSH's shared untrusted-Markdown renderer instead of rolling our
@@ -145,6 +166,44 @@ interface VersionNotes {
     }
     const MarkdownText = uiPrimitives.MarkdownText
     const h = React.createElement.bind(React)
+
+    /** Minimal structural typing for the React class API used below. */
+    interface SafeMarkdownProps { text: string }
+    interface SafeMarkdownState { failed?: boolean }
+    const ReactComponent = (React as unknown as {
+      Component: new (props: SafeMarkdownProps) => {
+        props: SafeMarkdownProps
+        state: SafeMarkdownState
+        render(): unknown
+      }
+    }).Component
+
+    /**
+     * MarkdownText is an undocumented shell primitive whose render can throw
+     * (labels shape drift, markdown edge cases). Contain any failure to this
+     * one note body instead of crashing the whole settings section.
+     */
+    class SafeMarkdown extends ReactComponent {
+      constructor(props: SafeMarkdownProps) {
+        super(props)
+        this.state = { failed: false }
+      }
+
+      static getDerivedStateFromError(): SafeMarkdownState {
+        return { failed: true }
+      }
+
+      componentDidCatch(error: unknown): void {
+        console.warn('[dsh-plugin-info] MarkdownText failed; falling back to plain text', error)
+      }
+
+      render(): unknown {
+        if (this.state.failed === true) {
+          return h('pre', { className: 'dpi-id', style: { whiteSpace: 'pre-wrap', margin: 0 } }, this.props.text)
+        }
+        return h(MarkdownText, { text: this.props.text, labels: MARKDOWN_LABELS })
+      }
+    }
 
     const ensureStyles = (): void => {
       if (document.querySelector('style[data-plugin="@eya46/dsh-plugin-info"]') !== null) return
@@ -223,18 +282,19 @@ interface VersionNotes {
       const [notes, setNotes] = React.useState<Record<string, VersionNotes>>({})
       const [notesBusy, setNotesBusy] = React.useState('')
       const [copied, setCopied] = React.useState<Record<string, boolean>>({})
+      const [profileCli, setProfileCli] = React.useState('web')
 
-      const copyName = React.useCallback((name: string) => {
+      const copyText = React.useCallback((key: string, text: string) => {
         const write = (): Promise<void> => {
           if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined) {
-            return navigator.clipboard.writeText(name)
+            return navigator.clipboard.writeText(text)
           }
           return Promise.reject(new Error('clipboard unavailable'))
         }
         write()
           .then(() => {
-            setCopied((prev) => ({ ...prev, [name]: true }))
-            window.setTimeout(() => setCopied((prev) => ({ ...prev, [name]: false })), 1200)
+            setCopied((prev) => ({ ...prev, [key]: true }))
+            window.setTimeout(() => setCopied((prev) => ({ ...prev, [key]: false })), 1200)
           })
           .catch(() => {})
       }, [])
@@ -242,10 +302,11 @@ interface VersionNotes {
       const load = React.useCallback(() => {
         setBusy(true)
         fetch(API + '/plugins')
-          .then((response) => response.json() as Promise<{ plugins?: PluginRow[], message?: string }>)
+          .then((response) => response.json() as Promise<{ plugins?: PluginRow[], profileCli?: string, message?: string }>)
           .then((data) => {
             if (!Array.isArray(data.plugins)) throw new Error(data.message ?? 'unexpected response')
             setRows(data.plugins)
+            if (typeof data.profileCli === 'string' && data.profileCli.length > 0) setProfileCli(data.profileCli)
             setError('')
           })
           .catch((caught) => setError(String(caught)))
@@ -303,7 +364,7 @@ interface VersionNotes {
       const updateCount = rows.filter((row) => row.hasUpdate).length
       const children: unknown[] = [
         h('h2', { key: 'title', className: 'dpi-title' }, '插件信息'),
-        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile 里用户添加的插件（不含随发行版内置的 bundle）。展开后默认看最近 10 个版本，点版本可看更新说明。'),
+        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile（' + profileCli + '）里用户添加的插件（不含随发行版内置的 bundle）。有更新时可一键复制 dsh plugin 命令；展开后默认看最近 10 个版本，点版本可看更新说明。'),
         h('div', { key: 'toolbar', className: 'dpi-toolbar' },
           h('button', { className: 'dpi-secondaryButton', disabled: busy, onClick: () => { load() } }, busy ? '刷新中…' : '刷新'),
           h('span', { className: 'dpi-status' }, '共 ' + rows.length + ' 个插件' + (updateCount > 0 ? ' · ' + updateCount + ' 个可更新' : '')),
@@ -324,9 +385,12 @@ interface VersionNotes {
         }
         if (plugin.hasUpdate && plugin.latestVersion !== undefined) {
           head.push(h('span', { key: 'up', className: 'dpi-tag', 'data-tone': 'warn' }, '可更新 ' + plugin.latestVersion))
-        } else if (plugin.source === 'registry' && plugin.latestVersion !== undefined) {
+        } else if (!plugin.hasUpdate && plugin.latestVersion !== undefined) {
           head.push(h('span', { key: 'ok', className: 'dpi-tag', 'data-tone': 'ok' }, '已是最新'))
         }
+        const updateCommand = plugin.updateCommand
+          ?? ('dsh plugin --profile ' + profileCli + ' add ' + plugin.name + '@latest')
+        const updateCopied = copied['update:' + plugin.name] === true
         const body: unknown[] = []
         if (expanded) {
           if (plugin.description !== undefined) body.push(h('p', { key: 'desc', className: 'dpi-meta' }, plugin.description))
@@ -335,13 +399,16 @@ interface VersionNotes {
             h('span', { className: 'dpi-id' }, plugin.spec),
             plugin.latestVersion === undefined ? null : ' · 最新 ' + plugin.latestVersion,
           ))
+          if (plugin.hasUpdate) {
+            body.push(h('p', { key: 'upd', className: 'dpi-command' }, updateCommand))
+          }
           if (plugin.error !== undefined) body.push(h('p', { key: 'perr', className: 'dpi-banner' }, plugin.error))
           const links: unknown[] = [
             h('button', {
               key: 'copy',
               className: 'dpi-copyTag',
               title: '复制包名',
-              onClick: () => { copyName(plugin.name) },
+              onClick: () => { copyText(plugin.name, plugin.name) },
             }, copied[plugin.name] === true ? '已复制' : plugin.name),
             h('button', {
               key: 'vers',
@@ -349,6 +416,14 @@ interface VersionNotes {
               onClick: () => { loadVersions(plugin.name) },
             }, versions[plugin.name] === undefined ? '加载版本' : '重新加载版本'),
           ]
+          if (plugin.hasUpdate) {
+            links.push(h('button', {
+              key: 'upd',
+              className: 'dpi-rowButton',
+              title: updateCommand,
+              onClick: () => { copyText('update:' + plugin.name, updateCommand) },
+            }, updateCopied ? '已复制更新命令' : '复制更新命令'))
+          }
           if (plugin.homepage !== undefined) {
             links.push(h('a', { key: 'home', className: 'dpi-rowButton dpi-link', href: plugin.homepage, target: '_blank', rel: 'noreferrer' }, '主页'))
           }
@@ -363,7 +438,7 @@ interface VersionNotes {
           } else if (pluginVersions === undefined) {
             body.push(h('p', { key: 'vload', className: 'dpi-meta' }, '正在加载最近 10 个版本…'))
           } else if (pluginVersions.length === 0) {
-            body.push(h('p', { key: 'vempty', className: 'dpi-meta' }, plugin.source === 'registry' ? '注册表没有版本记录。' : '本地 / git 安装没有更多历史版本。'))
+            body.push(h('p', { key: 'vempty', className: 'dpi-meta' }, plugin.source === 'registry' ? '注册表没有版本记录。' : '没有可展示的历史版本。'))
           } else {
             const versionNodes = pluginVersions.map((row) => {
               const key = plugin.name + '@' + row.version
@@ -382,7 +457,7 @@ interface VersionNotes {
                 } else if (note.source === 'github-release') {
                   if (note.title !== undefined) noteChildren.push(h('p', { key: 'nt', className: 'dpi-meta' }, note.title))
                   if (note.body !== undefined && note.body !== '') {
-                    noteChildren.push(h(MarkdownText, { key: 'nb', text: note.body }))
+                    noteChildren.push(h(SafeMarkdown, { key: 'nb', text: note.body }))
                   }
                   if (note.url !== undefined) {
                     noteChildren.push(h('a', { key: 'nu', className: 'dpi-link', href: note.url, target: '_blank', rel: 'noreferrer' }, '在 GitHub 查看 Release'))
@@ -418,11 +493,23 @@ interface VersionNotes {
           }
         }
         cards.push(h('li', { key: plugin.name, className: 'dpi-card' },
-          h('button', {
-            className: 'dpi-head',
-            'aria-expanded': expanded,
-            onClick: () => { togglePlugin(plugin.name) },
-          }, ...head),
+          h('div', { className: 'dpi-cardTop' },
+            h('button', {
+              className: 'dpi-head',
+              'aria-expanded': expanded,
+              onClick: () => { togglePlugin(plugin.name) },
+            }, ...head),
+            plugin.hasUpdate
+              ? h('button', {
+                className: 'dpi-updateCopy',
+                title: updateCommand,
+                onClick: (event: { stopPropagation?: () => void }) => {
+                  event.stopPropagation?.()
+                  copyText('update:' + plugin.name, updateCommand)
+                },
+              }, updateCopied ? '已复制' : '复制更新命令')
+              : null,
+          ),
           expanded ? h('div', { className: 'dpi-body' }, ...body) : null,
         ))
       }
