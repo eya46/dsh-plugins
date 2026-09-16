@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import type { GithubReleaseSpec, InstalledPackage, PluginSource, ProfileManifest } from './types.ts'
 
 /** Prefix DSH writes onto a profile package.json `name`. */
@@ -18,8 +18,13 @@ export function profileCliName(manifestName: string | undefined, profileDir: str
     const id = manifestName.slice(PROFILE_PACKAGE_PREFIX.length).trim()
     if (id.length > 0) return id
   }
-  const dirName = basename(profileDir.replace(/[\\/]+$/, ''))
-  if (dirName.length > 0 && dirName !== '.' && dirName !== '..') return dirName
+  // Split on both separators instead of `path.basename`, whose notion of a
+  // separator follows the host platform: a Windows profile path would come
+  // back whole (and `.`/`..` would slip through) when running on POSIX. A
+  // drive-only tail is a filesystem root, whose basename is empty.
+  const trimmed = profileDir.replace(/[\\/]+$/, '')
+  const dirName = trimmed.split(/[\\/]/).pop() ?? ''
+  if (dirName.length > 0 && dirName !== '.' && dirName !== '..' && !/^[A-Za-z]:$/.test(dirName)) return dirName
   return 'web'
 }
 

@@ -18,6 +18,23 @@ describe('profileCliName', () => {
     expect(profileCliName('', 'C:\\Users\\me\\.dsh\\profiles\\tui\\')).toBe('tui')
     expect(profileCliName('dsh-profile-', '.')).toBe('web')
   })
+
+  it('splits both separator styles regardless of the host platform', () => {
+    // `path.basename` follows the host platform's separator, so on POSIX a
+    // Windows profile path used to come back whole from this call.
+    expect(profileCliName(undefined, 'C:\\Users\\me\\.dsh\\profiles\\tui')).toBe('tui')
+    expect(profileCliName(undefined, 'C:\\Users\\me\\.dsh\\profiles\\tui\\')).toBe('tui')
+    expect(profileCliName(undefined, 'C:/Users/me/.dsh/profiles/tui')).toBe('tui')
+    expect(profileCliName(undefined, '/home/user/.dsh/profiles/tui/')).toBe('tui')
+  })
+
+  it('falls back to web for dot, root, and empty directory names', () => {
+    expect(profileCliName('', '.')).toBe('web')
+    expect(profileCliName('', '..')).toBe('web')
+    expect(profileCliName('', '/')).toBe('web')
+    expect(profileCliName('', 'C:\\')).toBe('web')
+    expect(profileCliName('', '')).toBe('web')
+  })
 })
 
 describe('pluginUpdateCommand', () => {
