@@ -1,15 +1,20 @@
 import { fileURLToPath } from 'node:url'
-import { hasNewerVersion } from './semver.ts'
+import { hasNewerVersion, normalizeVersion, versionFromTag } from './semver.ts'
 import {
   classifySpec,
   listUserPlugins,
+  parseGithubReleaseSpec,
   parseGithubRepo,
+  pluginUpdateCommand,
+  profileCliName,
   readInstalledPackage,
   readProfileManifest,
+  releaseDownloadUrl,
   repositoryUrlOf,
 } from './profile.ts'
 import { latestVersionOf, packumentUrl, previousPublishedVersion, recentVersions } from './registry.ts'
 import type {
+  GithubReleaseSpec,
   Packument,
   PluginConfig,
   PluginSummary,
@@ -26,10 +31,21 @@ interface CacheEntry<T> {
   value: T
 }
 
+/** One GitHub release as the service consumes it. */
+interface GithubReleaseItem {
+  tag: string
+  publishedAt?: string
+  url?: string
+  prerelease: boolean
+  draft: boolean
+}
+
 /** Query surface used by the HTTP API and tests. */
 export class PluginInfoService {
   private readonly packuments = new Map<string, CacheEntry<Packument>>()
   private readonly notes = new Map<string, CacheEntry<VersionNotes>>()
+  private readonly githubLatest = new Map<string, CacheEntry<GithubReleaseItem | undefined>>()
+  private readonly githubReleases = new Map<string, CacheEntry<GithubReleaseItem[]>>()
 
   constructor(
     private readonly config: PluginConfig,
@@ -38,11 +54,12 @@ export class PluginInfoService {
   ) {}
 
   /** List user-added plugins for one profile directory. */
-  async listPlugins(profileDir: string): Promise<{ profile: string, plugins: PluginSummary[] }> {
+  async listPlugins(profileDir: string): Promise<{ profile: string, profileCli: string, plugins: PluginSummary[] }> {
     const manifest = readProfileManifest(profileDir)
+    const profileCli = profileCliName(manifest.name, profileDir)
     const listed = listUserPlugins(manifest).filter((item) => isAllowedScope(item.name, this.config.allowScopes))
-    const plugins = await Promise.all(listed.map(async (item) => this.describePlugin(profileDir, item.name, item.spec)))
-    return { profile: manifest.name ?? profileDir, plugins }
+    const plugins = await Promise.all(listed.map(async (item) => this.describePlugin(profileDir, profileCli, item.name, item.spec)))
+    return { profile: manifest.name ?? profileDir, profileCli, plugins }
   }
 
   /** Recent published versions for one user-added plugin. */
@@ -56,6 +73,14 @@ export class PluginInfoService {
     const installed = readInstalledPackage(profileDir, name)
     if (plugin.source !== 'registry') {
       const installedVersion = installed?.version
+      const releaseSpec = parseGithubReleaseSpec(plugin.spec)
+      if (releaseSpec !== undefined) {
+        try {
+          return await this.githubReleaseVersions(name, installedVersion, releaseSpec, limit)
+        } catch {
+          // GitHub unavailable — fall through to the installed-only listing.
+        }
+      }
       return {
         name,
         ...installedVersion === undefined ? {} : { installedVersion },
@@ -77,16 +102,16 @@ export class PluginInfoService {
 
   /** Update notes for one published version. */
   async versionNotes(profileDir: string, name: string, version: string): Promise<VersionNotes> {
-    findUserPlugin(profileDir, name, this.config.allowScopes)
+    const plugin = findUserPlugin(profileDir, name, this.config.allowScopes)
     const cacheKey = `${name}@${version}`
     const cached = this.notes.get(cacheKey)
     if (cached !== undefined && cached.expiresAt > this.now()) return cached.value
-    const notes = await this.loadNotes(profileDir, name, version)
+    const notes = await this.loadNotes(profileDir, name, version, plugin.spec)
     this.notes.set(cacheKey, { value: notes, expiresAt: this.now() + this.config.cacheTtlMs })
     return notes
   }
 
-  private async describePlugin(profileDir: string, name: string, spec: string): Promise<PluginSummary> {
+  private async describePlugin(profileDir: string, profileCli: string, name: string, spec: string): Promise<PluginSummary> {
     const source = classifySpec(spec)
     const installed = readInstalledPackage(profileDir, name)
     const installedRepository = repositoryUrlOf(installed?.repository)
@@ -100,17 +125,19 @@ export class PluginInfoService {
       ...installed?.homepage === undefined ? {} : { homepage: installed.homepage },
       ...installedRepository === undefined ? {} : { repository: installedRepository },
     }
-    if (source !== 'registry') return summary
+    if (source !== 'registry') return this.describeReleaseSpecPlugin(profileCli, spec, summary)
     try {
       const packument = await this.loadPackument(name)
       const latestVersion = latestVersionOf(packument)
       const homepage = summary.homepage ?? packument.homepage
       const repository = summary.repository ?? repositoryUrlOf(packument.repository)
+      const hasUpdate = hasNewerVersion(summary.installedVersion, latestVersion)
       return {
         ...summary,
         ...packument.description === undefined || summary.description !== undefined ? {} : { description: packument.description },
         ...latestVersion === undefined ? {} : { latestVersion },
-        hasUpdate: hasNewerVersion(summary.installedVersion, latestVersion),
+        hasUpdate,
+        ...hasUpdate ? { updateCommand: pluginUpdateCommand(profileCli, name) } : {},
         ...homepage === undefined ? {} : { homepage },
         ...repository === undefined ? {} : { repository },
       }
@@ -133,7 +160,121 @@ export class PluginInfoService {
     return packument
   }
 
-  private async loadNotes(profileDir: string, name: string, version: string): Promise<VersionNotes> {
+  /**
+   * The repo's latest published release (GitHub skips prereleases/drafts),
+   * or undefined when the repo has no releases. Negative answers are cached
+   * too so a repo without releases does not burn the API rate limit.
+   */
+  private async loadGithubLatest(owner: string, repo: string): Promise<GithubReleaseItem | undefined> {
+    const key = `${owner}/${repo}`
+    const cached = this.githubLatest.get(key)
+    if (cached !== undefined && cached.expiresAt > this.now()) return cached.value
+    let payload: unknown
+    try {
+      payload = await this.fetchJson(
+        `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
+        this.config.timeoutMs,
+        githubHeaders(),
+      )
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('HTTP 404')) {
+        this.githubLatest.set(key, { value: undefined, expiresAt: this.now() + this.config.cacheTtlMs })
+        return undefined
+      }
+      throw error
+    }
+    const release = asGithubRelease(payload)
+    this.githubLatest.set(key, { value: release, expiresAt: this.now() + this.config.cacheTtlMs })
+    return release
+  }
+
+  /** Newest-first GitHub releases for one repo, cached per repo. */
+  private async loadGithubReleases(owner: string, repo: string, limit: number): Promise<GithubReleaseItem[]> {
+    const key = `${owner}/${repo}`
+    const cached = this.githubReleases.get(key)
+    if (cached !== undefined && cached.expiresAt > this.now()) return cached.value
+    const perPage = Math.min(100, Math.max(1, Math.trunc(limit)))
+    const payload = await this.fetchJson(
+      `https://api.github.com/repos/${owner}/${repo}/releases?per_page=${perPage}`,
+      this.config.timeoutMs,
+      githubHeaders(),
+    )
+    if (!Array.isArray(payload)) throw new Error(`GitHub returned a non-array releases payload for ${owner}/${repo}`)
+    const releases = payload
+      .map((item) => asGithubRelease(item))
+      .filter((item): item is GithubReleaseItem => item !== undefined)
+    this.githubReleases.set(key, { value: releases, expiresAt: this.now() + this.config.cacheTtlMs })
+    return releases
+  }
+
+  /**
+   * Update detection for GitHub-release tarball installs: the dependency spec
+   * itself names the repository and the currently installed tag, so the
+   * latest release is looked up from that repo — nothing is hardcoded.
+   */
+  private async describeReleaseSpecPlugin(profileCli: string, spec: string, summary: PluginSummary): Promise<PluginSummary> {
+    const releaseSpec = parseGithubReleaseSpec(spec)
+    if (releaseSpec === undefined) return summary
+    const repository = `https://github.com/${releaseSpec.owner}/${releaseSpec.repo}`
+    try {
+      const latest = await this.loadGithubLatest(releaseSpec.owner, releaseSpec.repo)
+      const latestVersion = latest === undefined ? undefined : versionFromTag(latest.tag)
+      const installedVersion = summary.installedVersion ?? versionFromTag(releaseSpec.tag)
+      const hasUpdate = hasNewerVersion(installedVersion, latestVersion)
+      const oldVersion = versionFromTag(releaseSpec.tag) ?? summary.installedVersion
+      const updateUrl = latest !== undefined && latestVersion !== undefined && oldVersion !== undefined && hasUpdate
+        ? releaseDownloadUrl(releaseSpec, latest.tag, latestVersion, oldVersion)
+        : undefined
+      return {
+        ...summary,
+        ...summary.repository === undefined ? { repository } : {},
+        ...latestVersion === undefined ? {} : { latestVersion },
+        hasUpdate,
+        ...hasUpdate && updateUrl !== undefined
+          ? { updateCommand: `dsh plugin --profile ${profileCli} add "${updateUrl}"` }
+          : {},
+      }
+    } catch (error) {
+      return { ...summary, repository, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** GitHub release history reshaped into version rows for one URL install. */
+  private async githubReleaseVersions(
+    name: string,
+    installedVersion: string | undefined,
+    releaseSpec: GithubReleaseSpec,
+    limit: number,
+  ): Promise<{ name: string, installedVersion?: string, latestVersion?: string, versions: PluginVersionRow[] }> {
+    const releases = await this.loadGithubReleases(releaseSpec.owner, releaseSpec.repo, limit)
+    const normalizedInstalled = installedVersion === undefined ? undefined : normalizeVersion(installedVersion)
+    const published = releases
+      .filter((release) => !release.draft && versionFromTag(release.tag) !== undefined)
+      .slice(0, Math.max(0, limit))
+    const rows: PluginVersionRow[] = published.map((release) => {
+      const version = versionFromTag(release.tag) as string
+      return {
+        version,
+        ...release.publishedAt === undefined ? {} : { publishedAt: release.publishedAt },
+        latest: false,
+        installed: normalizedInstalled !== undefined && version === normalizedInstalled,
+      }
+    })
+    // Mirror GitHub's /releases/latest semantics: the newest non-prerelease
+    // row is "latest"; a repo that only publishes prereleases keeps its first row.
+    const latestIndex = published.findIndex((release) => !release.prerelease)
+    const latestRow = (latestIndex === -1 ? rows[0] : rows[latestIndex]) ?? undefined
+    if (latestRow !== undefined) latestRow.latest = true
+    const latestVersion = latestRow?.version
+    return {
+      name,
+      ...installedVersion === undefined ? {} : { installedVersion },
+      ...latestVersion === undefined ? {} : { latestVersion },
+      versions: rows,
+    }
+  }
+
+  private async loadNotes(profileDir: string, name: string, version: string, spec: string): Promise<VersionNotes> {
     const installed = readInstalledPackage(profileDir, name)
     let packument: Packument | undefined
     try {
@@ -141,8 +282,12 @@ export class PluginInfoService {
     } catch {
       packument = undefined
     }
+    const releaseSpec = parseGithubReleaseSpec(spec)
     const repository = repositoryUrlOf(installed?.repository) ?? repositoryUrlOf(packument?.repository)
-    const github = repository === undefined ? undefined : parseGithubRepo(repository)
+    let github = repository === undefined ? undefined : parseGithubRepo(repository)
+    if (github === undefined && releaseSpec !== undefined) {
+      github = { owner: releaseSpec.owner, repo: releaseSpec.repo }
+    }
     const publishedAt = packument?.time?.[version]
     const base: VersionNotes = {
       name,
@@ -152,7 +297,12 @@ export class PluginInfoService {
     }
     if (github === undefined) return base
 
-    const release = await this.fetchGithubRelease(github.owner, github.repo, version)
+    // The spec's own tag is the strongest hint for the installed version:
+    // that download URL is literally where this tarball came from.
+    const specTag = releaseSpec !== undefined && versionFromTag(releaseSpec.tag) === normalizeVersion(version)
+      ? releaseSpec.tag
+      : undefined
+    const release = await this.fetchGithubRelease(github.owner, github.repo, version, specTag === undefined ? [] : [specTag])
     if (release !== undefined) {
       return {
         ...base,
@@ -180,8 +330,9 @@ export class PluginInfoService {
     owner: string,
     repo: string,
     version: string,
+    preferredTags: string[] = [],
   ): Promise<{ title?: string, body?: string, url?: string, publishedAt?: string } | undefined> {
-    const tags = unique([version, `v${version}`])
+    const tags = unique([...preferredTags, version, `v${version}`])
     for (const tag of tags) {
       try {
         const payload = await this.fetchJson(
@@ -268,6 +419,23 @@ function findUserPlugin(profileDir: string, name: string, allowScopes?: string[]
 
 function unique(values: string[]): string[] {
   return [...new Set(values.filter(value => value.length > 0))]
+}
+
+/** Extract the release fields the service needs from a GitHub API payload. */
+function asGithubRelease(payload: unknown): GithubReleaseItem | undefined {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return undefined
+  const record = payload as Record<string, unknown>
+  const tag = typeof record.tag_name === 'string' && record.tag_name.length > 0 ? record.tag_name : undefined
+  if (tag === undefined) return undefined
+  const publishedAt = typeof record.published_at === 'string' ? record.published_at : undefined
+  const url = typeof record.html_url === 'string' ? record.html_url : undefined
+  return {
+    tag,
+    ...publishedAt === undefined ? {} : { publishedAt },
+    ...url === undefined ? {} : { url },
+    prerelease: record.prerelease === true,
+    draft: record.draft === true,
+  }
 }
 
 /** True when `name` matches one of the configured scope prefixes (empty list = allow all). */

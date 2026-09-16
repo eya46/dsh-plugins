@@ -1,6 +1,16 @@
 /** Where a profile dependency spec came from. */
 export type PluginSource = 'registry' | 'file' | 'link' | 'git' | 'other'
 
+/** A profile dependency spec that installs a GitHub release tarball directly. */
+export interface GithubReleaseSpec {
+  owner: string
+  repo: string
+  /** Release tag embedded in the download URL, e.g. `v2.0.3`. */
+  tag: string
+  /** Tarball file name, e.g. `dsh-skill-mcp-panel-2.0.3.tgz`. */
+  asset: string
+}
+
 /** One user-added profile plugin as the UI lists it. */
 export interface PluginSummary {
   /** npm package name. */
@@ -17,6 +27,11 @@ export interface PluginSummary {
   latestVersion?: string
   /** True when the registry latest is newer than the installed version. */
   hasUpdate: boolean
+  /**
+   * `dsh plugin --profile <name> add <pkg>@latest` when this row has a
+   * registry update. Omitted for local / git installs and up-to-date packages.
+   */
+  updateCommand?: string
   /** Package homepage. */
   homepage?: string
   /** Normalized repository browse URL. */

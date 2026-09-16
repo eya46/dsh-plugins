@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { compareVersions, hasNewerVersion, parseVersion } from '../src/semver.ts'
+import { compareVersions, hasNewerVersion, parseVersion, versionFromTag } from '../src/semver.ts'
+
+describe('versionFromTag', () => {
+  it('reads versions out of release tags', () => {
+    expect(versionFromTag('v2.0.3')).toBe('2.0.3')
+    expect(versionFromTag('2.0.3')).toBe('2.0.3')
+    expect(versionFromTag('panel-1.20.3-rc.1')).toBe('1.20.3-rc.1')
+    expect(versionFromTag('nightly')).toBeUndefined()
+  })
+})
 
 describe('parseVersion', () => {
   it('accepts a leading v and prerelease', () => {

@@ -1,7 +1,32 @@
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import type { InstalledPackage, PluginSource, ProfileManifest } from './types.ts'
+import { basename, join } from 'node:path'
+import type { GithubReleaseSpec, InstalledPackage, PluginSource, ProfileManifest } from './types.ts'
+
+/** Prefix DSH writes onto a profile package.json `name`. */
+const PROFILE_PACKAGE_PREFIX = 'dsh-profile-'
+
+/**
+ * CLI `--profile` argument for this profile directory.
+ *
+ * DSH names the manifest `dsh-profile-<dir>` and the CLI flag is the
+ * directory basename (`web`, `tui`, …). Prefer the manifest prefix so temp
+ * test dirs still resolve; fall back to the folder name, then `web`.
+ */
+export function profileCliName(manifestName: string | undefined, profileDir: string): string {
+  if (typeof manifestName === 'string' && manifestName.startsWith(PROFILE_PACKAGE_PREFIX)) {
+    const id = manifestName.slice(PROFILE_PACKAGE_PREFIX.length).trim()
+    if (id.length > 0) return id
+  }
+  const dirName = basename(profileDir.replace(/[\\/]+$/, ''))
+  if (dirName.length > 0 && dirName !== '.' && dirName !== '..') return dirName
+  return 'web'
+}
+
+/** `dsh plugin add …@latest` command for one registry package in this profile. */
+export function pluginUpdateCommand(profileCli: string, packageName: string): string {
+  return `dsh plugin --profile ${profileCli} add ${packageName}@latest`
+}
 
 /** Classify a profile dependency spec. */
 export function classifySpec(spec: string): PluginSource {
@@ -95,4 +120,44 @@ export function parseGithubRepo(input: string): { owner: string, repo: string } 
     return { owner, repo }
   }
   return undefined
+}
+
+const GITHUB_RELEASE_SPEC = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/releases\/download\/([^/\s]+)\/([^/\s]+)$/i
+
+/**
+ * Parse a `github.com/<owner>/<repo>/releases/download/<tag>/<asset>`
+ * dependency spec into its repository, tag, and asset. Everything is derived
+ * from the spec itself — no per-plugin configuration.
+ */
+export function parseGithubReleaseSpec(spec: string): GithubReleaseSpec | undefined {
+  const match = GITHUB_RELEASE_SPEC.exec(spec.trim())
+  if (match === null) return undefined
+  const [rawOwner, rawRepo, rawTag, rawAsset] = match.slice(1)
+  if (rawOwner === undefined || rawRepo === undefined || rawTag === undefined || rawAsset === undefined) return undefined
+  try {
+    return {
+      owner: decodeURIComponent(rawOwner),
+      repo: decodeURIComponent(rawRepo),
+      tag: decodeURIComponent(rawTag),
+      asset: decodeURIComponent(rawAsset),
+    }
+  } catch {
+    return { owner: rawOwner, repo: rawRepo, tag: rawTag, asset: rawAsset }
+  }
+}
+
+/**
+ * Rewrite a release spec onto a newer tag. The asset file name keeps its
+ * shape: an embedded version token equal to `oldVersion` is replaced by
+ * `newVersion` (`dsh-skill-mcp-panel-2.0.3.tgz` → `…-2.0.4.tgz`) without
+ * touching longer version numbers (`12.0.3`) that merely contain it.
+ */
+export function releaseDownloadUrl(spec: GithubReleaseSpec, newTag: string, newVersion: string, oldVersion: string): string {
+  return `https://github.com/${spec.owner}/${spec.repo}/releases/download/${encodeURIComponent(newTag)}/${encodeURIComponent(replaceVersionToken(spec.asset, oldVersion, newVersion))}`
+}
+
+function replaceVersionToken(asset: string, from: string, to: string): string {
+  if (from.length === 0 || from === to) return asset
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return asset.replace(new RegExp(`(?<![\\d.])${escaped}(?!\\d)`), to)
 }

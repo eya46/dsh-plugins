@@ -6,6 +6,8 @@
 
 - 列出已安装插件、当前版本、来源（npm / 本地 / git）
 - 对 registry 安装的包对照 `dist-tags.latest`，标出可更新
+- 对 **GitHub Release 直装**的包（依赖是 `github.com/…/releases/download/<tag>/<file>.tgz` 链接），从依赖链接里解析出仓库和当前版本，对照该仓库的最新 Release 标出可更新——仓库与版本全部取自 profile 里的依赖信息和已安装的包信息，无需任何按插件配置；更新命令直接指向按新版本重写过的 tarball 链接，版本列表也会展示该仓库最近的 Release，点开可读对应 Release 说明
+- 可更新时一键复制 `dsh plugin --profile <当前 profile> add <包>@latest`（profile 从当前运行的 Profile 清单解析，web 端通常是 `web`）
 - 展开后默认看最近 **10** 条版本
 - 点某个版本读更新说明：优先 GitHub Release，没有就回落到相邻版本的 compare / commit
 
@@ -35,7 +37,7 @@ dsh plugin --profile web add "file:./packages/dsh-plugin-info"
 
 | 端点 | 说明 |
 | --- | --- |
-| `GET /plugin-info/api/plugins` | 当前 Profile 用户插件 + 是否有更新 |
+| `GET /plugin-info/api/plugins` | 当前 Profile 用户插件 + 是否有更新；含 `profileCli`，可更新的 registry 包还会带 `updateCommand` |
 | `GET /plugin-info/api/versions?name=<pkg>&limit=10` | 最近版本，默认 10 条 |
 | `GET /plugin-info/api/notes?name=<pkg>&version=<ver>` | 该版本的更新说明 |
 

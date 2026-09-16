@@ -12,11 +12,12 @@ import { fetchJson, PluginInfoService, profileDirFromBaseUrl } from './service.t
 import { resolveVersionLimit } from './registry.ts'
 import type { PluginConfig } from './types.ts'
 
-export { classifySpec, listUserPlugins, parseGithubRepo, repositoryUrlOf } from './profile.ts'
-export { hasNewerVersion, parseVersion } from './semver.ts'
+export { classifySpec, listUserPlugins, parseGithubReleaseSpec, parseGithubRepo, pluginUpdateCommand, profileCliName, releaseDownloadUrl, repositoryUrlOf } from './profile.ts'
+export { hasNewerVersion, parseVersion, versionFromTag } from './semver.ts'
 export { latestVersionOf, packumentUrl, recentVersions, resolveVersionLimit } from './registry.ts'
 export { fetchJson, PluginInfoService, profileDirFromBaseUrl } from './service.ts'
 export type {
+  GithubReleaseSpec,
   InstalledPackage,
   Packument,
   PluginConfig,

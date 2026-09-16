@@ -67,6 +67,14 @@ export function compareVersions(left: string, right: string): number {
   return compareParsed(parsedLeft, parsedRight)
 }
 
+/** Version embedded in a release tag: `v2.0.3`, `2.0.3`, or `panel-1.20.3-rc.1`. */
+export function versionFromTag(tag: string): string | undefined {
+  const direct = parseVersion(tag)
+  if (direct !== undefined) return normalizeVersion(tag)
+  const match = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(tag)
+  return match?.[1]
+}
+
 /** True when `latest` is a newer published version than `installed`. */
 export function hasNewerVersion(installed: string | undefined, latest: string | undefined): boolean {
   if (installed === undefined || latest === undefined) return false
