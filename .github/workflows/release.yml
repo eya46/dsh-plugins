@@ -44,15 +44,16 @@ jobs:
       - name: Create version PR or publish to npm
         uses: changesets/action@v2
         with:
-          # v2 pushes release commits/tags through the GitHub API and no longer
-          # reads the token from the environment or from checkout credentials.
+          # v2 pushes release commits/tags through the GitHub API and does not
+          # read the token from the environment or from checkout credentials.
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Open / update the "Version Packages" PR.
-          version-script: pnpm changeset version
+          # Version PR title/commit, and the publish command run on the merge.
+          # `version-script` is left to the action, which invokes the changesets
+          # CLI directly; `pnpm run release` forwards the CHANGESETS_OUTPUT
+          # ndjson the action needs to create tags and GitHub releases.
           commit-message: "chore: release packages"
           pr-title: "chore: release packages"
-          # What to run on the merge of the version PR (publishes + tags + releases).
-          publish-script: pnpm changeset publish
+          publish-script: pnpm run release
           create-github-releases: true
         env:
           # Use a Granular Access Token with "Automation" type as `NPM_TOKEN`.
