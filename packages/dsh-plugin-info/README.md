@@ -31,6 +31,8 @@ dsh plugin --profile web add "file:./packages/dsh-plugin-info"
 
 `dsh.bundle` 会把 `@eya46/dsh-plugin-info` 写进该 Profile 的 bundle 列表。重启 `dsh web` 后，打开设置 → **插件信息**。
 
+兼容的 DSH 版本：`^0.1.5-rc.2`（0.1.x）与 `^0.2.0-rc.2`（0.2.x，含当前 Desktop / Web 发行版）。**0.1.0 只声明了 `^0.1.5-rc.2`**，装在 0.2.0-rc.2 上会被插件管理器的兼容性预检拒绝（提示「要求 @deepseek-ai/dsh-host-webserver ^0.1.5-rc.2」），请升级到 0.1.1 或更新版本。
+
 ## HTTP
 
 本机回环可用：
