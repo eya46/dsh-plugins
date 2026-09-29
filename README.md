@@ -45,4 +45,13 @@ This monorepo uses [changesets](https://github.com/changesets/changesets) to dri
 2. **Merge the PR.** The `Release` GitHub Action opens (or updates) a `chore: release packages` PR that bumps affected `package.json` versions and writes per-package `CHANGELOG.md` entries.
 3. **Merge the release PR.** The same Action publishes the new versions to npm, creates the git tag, and opens a GitHub release with auto-generated notes for each package.
 
-Required GitHub repository secret: `NPM_TOKEN` — an [npm Granular Access Token](https://docs.npmjs.com/about-access-tokens#publishing-packages) with the "Automation" type, scoped to the packages this org publishes. Trusted publishing (OIDC) is planned.
+Required GitHub repository secret: **none.** Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC): the `Release` job grants `id-token: write`, and pnpm 11 (the pinned `packageManager`) exchanges that OIDC token for a short-lived npm publish token. Each published package must name this repository and workflow as its trusted publisher on npmjs.com — package → **Settings → Trusted Publisher → GitHub Actions**:
+
+| Field | Value |
+| --- | --- |
+| Organization or user | `eya46` |
+| Repository | `dsh-plugins` |
+| Workflow filename | `release.yml` |
+| Environment | _(leave empty)_ |
+
+npm also requires a recent pnpm for the exchange, which is why the workspace pins `pnpm@11.28.2`: pnpm 10 has provenance signing but no trusted-publishing support.

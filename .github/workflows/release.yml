@@ -25,8 +25,9 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         # Version is read from the `packageManager` field in package.json
-        # (pnpm@10.33.0). Don't pass `version:` here to avoid the
-        # "Multiple versions of pnpm specified" error.
+        # (pnpm@11.28.2, the first line with npm trusted-publishing support).
+        # Don't pass `version:` here to avoid the "Multiple versions of pnpm
+        # specified" error.
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -41,25 +42,11 @@ jobs:
       - name: Build
         run: pnpm -r --filter "./packages/**" run build
 
-      # changesets/action v1 wrote NPM_TOKEN into the runner's ~/.npmrc before
-      # publishing; v2 dropped that wiring and only documents trusted
-      # publishing, so npm and pnpm find no registry token and the publish
-      # fails with ENEEDAUTH. Write the config where both tools look for it.
-      - name: Authenticate to npm
-        run: |
-          if [ -z "${NPM_TOKEN}" ]; then
-            echo "::warning::NPM_TOKEN is empty or unset — publishing will fail. Add an npm Granular Access Token (Automation type) with publish rights for this scope."
-            exit 0
-          fi
-          if grep -qE '^[[:space:]]*//registry\.npmjs\.org/:[_-]authToken=' "$HOME/.npmrc" 2>/dev/null; then
-            echo "npm registry token already configured"
-          else
-            printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "$HOME/.npmrc"
-            echo "wrote the npm registry token to $HOME/.npmrc"
-          fi
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
+      # Publishing authenticates through npm trusted publishing (OIDC): the job
+      # grants `id-token: write`, and pnpm 11 exchanges that GitHub OIDC token
+      # for a short-lived npm publish token, so no NPM_TOKEN secret exists to
+      # create or rotate. The package must name this repository and workflow as
+      # its trusted publisher on npmjs.com for the exchange to succeed.
       - name: Create version PR or publish to npm
         uses: changesets/action@v2
         with:
@@ -74,7 +61,3 @@ jobs:
           pr-title: "chore: release packages"
           publish-script: pnpm run release
           create-github-releases: true
-        env:
-          # Use a Granular Access Token with "Automation" type as `NPM_TOKEN`.
-          # Trusted publishing (OIDC) is the future; for now a token is simplest.
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -62,12 +62,6 @@ importers:
         specifier: ^4.1.8
         version: 4.1.10(@types/node@22.20.3)(vite@8.2.1(@types/node@22.20.3)(yaml@2.9.1))
 
-  tmp/verify/home2/profiles/desktop:
-    dependencies:
-      '@eya46/dsh-plugin-info':
-        specifier: link:C:/Users/HHFX/codes/eya46-dsh-plugins/packages/dsh-plugin-info
-        version: link:../../../../../packages/dsh-plugin-info
-
 packages:
 
   '@changesets/apply-release-plan@8.1.1':

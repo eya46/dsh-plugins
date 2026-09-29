@@ -1,2 +1,8 @@
 packages:
   - packages/*
+
+# pnpm 11 rejects packages published within its supply-chain age window. These
+# plugins deliberately track DSH prereleases the moment they ship, so DeepSeek's
+# own packages are exempt while the window still guards everything else.
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/*'
