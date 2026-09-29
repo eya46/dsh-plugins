@@ -41,6 +41,25 @@ jobs:
       - name: Build
         run: pnpm -r --filter "./packages/**" run build
 
+      # changesets/action v1 wrote NPM_TOKEN into the runner's ~/.npmrc before
+      # publishing; v2 dropped that wiring and only documents trusted
+      # publishing, so npm and pnpm find no registry token and the publish
+      # fails with ENEEDAUTH. Write the config where both tools look for it.
+      - name: Authenticate to npm
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::warning::NPM_TOKEN is empty or unset — publishing will fail. Add an npm Granular Access Token (Automation type) with publish rights for this scope."
+            exit 0
+          fi
+          if grep -qE '^[[:space:]]*//registry\.npmjs\.org/:[_-]authToken=' "$HOME/.npmrc" 2>/dev/null; then
+            echo "npm registry token already configured"
+          else
+            printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "$HOME/.npmrc"
+            echo "wrote the npm registry token to $HOME/.npmrc"
+          fi
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create version PR or publish to npm
         uses: changesets/action@v2
         with:
