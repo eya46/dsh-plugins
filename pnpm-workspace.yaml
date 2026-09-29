@@ -1,5 +1,9 @@
+# Workspace members are listed explicitly. A working copy that is not committed
+# yet must not leak an importer into pnpm-lock.yaml: pnpm 11 fails a frozen
+# install when the lockfile records a project whose directory is missing on the
+# machine running it. Add each package here when it lands.
 packages:
-  - packages/*
+  - packages/dsh-plugin-info
 
 # pnpm 11 rejects packages published within its supply-chain age window. These
 # plugins deliberately track DSH prereleases the moment they ship, so DeepSeek's
