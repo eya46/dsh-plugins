@@ -1,5 +1,11 @@
 # @eya46/dsh-plugin-info
 
+## 0.2.1
+
+### Patch Changes
+
+- 18ef5ed: Shorten the settings page introduction so it no longer explains the update route.
+
 ## 0.2.0
 
 ### Minor Changes
