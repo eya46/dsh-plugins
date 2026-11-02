@@ -7,11 +7,29 @@
 - 列出已安装插件、当前版本、来源（npm / 本地 / git）
 - 对 registry 安装的包对照 `dist-tags.latest`，标出可更新
 - 对 **GitHub Release 直装**的包（依赖是 `github.com/…/releases/download/<tag>/<file>.tgz` 链接），从依赖链接里解析出仓库和当前版本，对照该仓库的最新 Release 标出可更新——仓库与版本全部取自 profile 里的依赖信息和已安装的包信息，无需任何按插件配置；更新命令直接指向按新版本重写过的 tarball 链接，版本列表也会展示该仓库最近的 Release，点开可读对应 Release 说明
-- 可更新时一键复制 `dsh plugin --profile <当前 profile> add <包>@latest`（profile 从当前运行的 Profile 清单解析，web 端通常是 `web`）
+- 可更新时**直接点「升级」**，由 Host 的插件管理器执行升级（详见下文「升级」）；同时仍可一键复制 `dsh plugin --profile <当前 profile> add <包>@latest`（profile 从当前运行的 Profile 清单解析，web 端通常是 `web`）
 - 展开后默认看最近 **10** 条版本
 - 点某个版本读更新说明：优先 GitHub Release，没有就回落到相邻版本的 compare / commit
 
 实现方式对齐 [dsh-model-meta-autofill](https://github.com/QJAG1024/dsh-model-meta-autofill)：Host 注册本机 HTTP API，Client half 通过 `dsh.client` 挂到 `settings.section`。
+
+## 升级
+
+「升级」按钮走 `POST /plugin-info/api/update`，Host 端**不自己跑 pnpm**，而是调用 DSH 自己的插件管理器（`ctx.pluginManager`），所以 profile 写锁、pnpm 执行环境、兼容性预检、HMR 重载全部是官方那一套。两条路径：
+
+| 运行时 | 路径 | 行为 |
+| --- | --- | --- |
+| DSH ≥ 0.2.2-alpha.2（有 `pluginManager.updateBundle`） | `plugin-manager` | 直接调用官方 `updateBundle(name, version)`：先查目标版本（存在、声明 bundle、`engines.dsh` / DSH peer 接受当前 DSH），有 HMR 时先卸掉已安装版本再装目标版本，失败自动把旧版本装回来 |
+| 更早的运行时（如当前 Desktop 0.2.1-rc.5） | `remove-and-install` | 官方 `updateBundle` 不存在，按官方内部同一顺序调用公开方法：`removeBundle(name)` → `installBundle("name@version", { saveExact: true, enabled })`；目标装失败就按 profile 里保存的 spec 把旧版本装回去 |
+
+页面上会显示这一步停在哪（检查版本 / 卸载旧版本 / 安装新版本）、用的是哪条路径、是否要重启才生效，以及失败时管理器的原始诊断与回滚结果。
+
+升级目标由 Host 校验，客户端只能选版本不能换包：
+
+- registry 插件：目标必须是 registry 里**已发布**且**比已装版本新**的版本，否则拒绝
+- GitHub Release 直装插件：Host 从已安装的依赖 spec 重建下载链接，要求请求里的 spec 与新版本链接一致且**同一个仓库**，避免把别人发布的 tarball 装进来
+
+可升级的前提是 `listBundles` 里该包可读、没有 `readOnlyReason`（管理组件自身不可被替换）、`removable` 为真且声明了 semver 版本。本地 `file:` / `link:` 安装没有可比的 registry 版本，不显示升级按钮。
 
 ### 可选：dsh-better-sidebar 标签页
 
@@ -42,6 +60,7 @@ dsh plugin --profile web add "file:./packages/dsh-plugin-info"
 | `GET /plugin-info/api/plugins` | 当前 Profile 用户插件 + 是否有更新；含 `profileCli`，可更新的 registry 包还会带 `updateCommand` |
 | `GET /plugin-info/api/versions?name=<pkg>&limit=10` | 最近版本，默认 10 条 |
 | `GET /plugin-info/api/notes?name=<pkg>&version=<ver>` | 该版本的更新说明 |
+| `POST /plugin-info/api/update` | 执行一次升级，body `{ "name": "<pkg>", "version": "<目标版本>" }`；返回 `{ name, from, to, step, ok, application, reason?, output?, logPath?, restore?, route }` |
 
 ## 配置
 

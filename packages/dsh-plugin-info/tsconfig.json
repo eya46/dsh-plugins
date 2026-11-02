@@ -12,6 +12,7 @@
     "src/registry.ts",
     "src/semver.ts",
     "src/service.ts",
-    "src/types.ts"
+    "src/types.ts",
+    "src/update.ts"
   ]
 }

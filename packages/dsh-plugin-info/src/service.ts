@@ -13,6 +13,8 @@ import {
   repositoryUrlOf,
 } from './profile.ts'
 import { latestVersionOf, packumentUrl, previousPublishedVersion, recentVersions } from './registry.ts'
+import { sameReleaseRepository } from './update.ts'
+import type { UpdateTarget } from './update.ts'
 import type {
   GithubReleaseSpec,
   Packument,
@@ -98,6 +100,56 @@ export class PluginInfoService {
       ...latestVersion === undefined ? {} : { latestVersion },
       versions: recentVersions(packument, installedVersion, limit),
     }
+  }
+
+  /**
+   * Validate the update a client asked for against the profile it names.
+   *
+   * A registry plugin is upgraded to an exact published version newer than the
+   * installed one, so a caller cannot downgrade it or install another package.
+   * A GitHub-release plugin keeps its repository: the request supplies the
+   * release's version and the service rebuilds the download URL from the
+   * installed spec, so the tarball always comes from the publisher the profile
+   * already trusts.
+   */
+  async updateTarget(
+    profileDir: string,
+    name: string,
+    request: { version?: string, spec?: string },
+  ): Promise<UpdateTarget> {
+    const plugin = findUserPlugin(profileDir, name, this.config.allowScopes)
+    const installed = readInstalledPackage(profileDir, name)
+    const installedVersion = installed?.version ?? versionFromTag(parseGithubReleaseSpec(plugin.spec)?.tag ?? '')
+    if (plugin.source === 'registry') {
+      const version = typeof request.version === 'string' ? normalizeVersion(request.version) : ''
+      if (version.length === 0) throw new Error('version is required for a registry plugin')
+      const packument = await this.loadPackument(name)
+      if (packument.versions?.[version] === undefined) {
+        throw new Error(`${name}@${version} is not a published version`)
+      }
+      if (!hasNewerVersion(installedVersion, version)) {
+        throw new Error(`${version} is not newer than the installed ${installedVersion ?? 'unknown'}`)
+      }
+      return { kind: 'version', version }
+    }
+    const releaseSpec = parseGithubReleaseSpec(plugin.spec)
+    if (releaseSpec === undefined) {
+      throw new Error(`${name} is not installed from a registry or a GitHub release, so it has no update target`)
+    }
+    const version = typeof request.version === 'string' ? normalizeVersion(request.version) : ''
+    const latest = await this.loadGithubLatest(releaseSpec.owner, releaseSpec.repo)
+    const targetVersion = version.length > 0 ? version : latest === undefined ? undefined : versionFromTag(latest.tag)
+    const targetTag = latest !== undefined && versionFromTag(latest.tag) === targetVersion ? latest.tag : `v${targetVersion ?? ''}`
+    if (targetVersion === undefined || targetVersion.length === 0) throw new Error(`${name} has no newer release`)
+    if (!hasNewerVersion(installedVersion, targetVersion)) {
+      throw new Error(`${targetVersion} is not newer than the installed ${installedVersion ?? 'unknown'}`)
+    }
+    const spec = releaseDownloadUrl(releaseSpec, targetTag, targetVersion, installedVersion ?? versionFromTag(releaseSpec.tag) ?? '')
+    const candidate = typeof request.spec === 'string' ? request.spec : spec
+    if (candidate !== spec || !sameReleaseRepository(plugin.spec, candidate)) {
+      throw new Error('the update spec must be a release download of the repository this plugin was installed from')
+    }
+    return { kind: 'spec', spec, version: targetVersion }
   }
 
   /** Update notes for one published version. */

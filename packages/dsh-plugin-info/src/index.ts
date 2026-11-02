@@ -7,15 +7,19 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
-import { requestUrl, sendJson } from './http.ts'
+import { readJsonBody, requestUrl, sendJson } from './http.ts'
 import { fetchJson, PluginInfoService, profileDirFromBaseUrl } from './service.ts'
 import { resolveVersionLimit } from './registry.ts'
+import { updatePlugin } from './update.ts'
+import type { PluginManagerLike } from './update.ts'
 import type { PluginConfig } from './types.ts'
 
 export { classifySpec, listUserPlugins, parseGithubReleaseSpec, parseGithubRepo, pluginUpdateCommand, profileCliName, releaseDownloadUrl, repositoryUrlOf } from './profile.ts'
 export { hasNewerVersion, parseVersion, versionFromTag } from './semver.ts'
 export { latestVersionOf, packumentUrl, recentVersions, resolveVersionLimit } from './registry.ts'
 export { fetchJson, PluginInfoService, profileDirFromBaseUrl } from './service.ts'
+export { comparableVersion, sameReleaseRepository, updatePlugin } from './update.ts'
+export type { ChangeFacts, PluginManagerLike, SpecTarget, UpdateOutcome, UpdateRoute, UpdateStep, UpdateTarget, VersionTarget } from './update.ts'
 export type {
   GithubReleaseSpec,
   InstalledPackage,
@@ -98,6 +102,41 @@ export function apply(ctx: Context, config: Config): void {
                 return
               }
               sendJson(res, 200, await service.versionNotes(profileDirFromBaseUrl(sctx.baseUrl), name, version))
+            } catch (error) {
+              sendError(res, error)
+            }
+          },
+        }),
+        // Upgrades run through the Host's own plugin manager, so the profile
+        // write lock, the pnpm runner and the compatibility preflight stay the
+        // official ones. Older runtimes without `updateBundle` get the same
+        // sequence through remove + install.
+        sctx.webServer.register({
+          kind: 'exact',
+          path: '/plugin-info/api/update',
+          handler: async (req, res) => {
+            if (req.method !== 'POST') {
+              sendJson(res, 405, { ok: false, reason: 'POST is required' })
+              return
+            }
+            try {
+              const body = await readJsonBody(req)
+              const record = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
+              const name = typeof record.name === 'string' ? record.name.trim() : ''
+              if (name.length === 0) {
+                sendJson(res, 400, { ok: false, reason: 'name is required' })
+                return
+              }
+              const manager = sctx.get('pluginManager') as PluginManagerLike | undefined
+              if (manager === undefined) {
+                sendJson(res, 503, { ok: false, reason: 'the plugin manager is not running in this Host' })
+                return
+              }
+              const target = await service.updateTarget(profileDirFromBaseUrl(sctx.baseUrl), name, {
+                ...typeof record.version === 'string' ? { version: record.version } : {},
+                ...typeof record.spec === 'string' ? { spec: record.spec } : {},
+              })
+              sendJson(res, 200, await updatePlugin(manager, name, target))
             } catch (error) {
               sendError(res, error)
             }

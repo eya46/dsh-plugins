@@ -100,6 +100,26 @@ interface VersionNotes {
   commits?: Array<{ sha: string, message: string, url?: string }>
 }
 
+/**
+ * The Host's answer to one upgrade. `step` is where it stopped, `route` says
+ * whether the official `plugin-manager.updateBundle` ran or the older
+ * remove-and-install sequence did; `restore` reports putting the previous
+ * version back after a failed install.
+ */
+interface UpdateOutcome {
+  name: string
+  from?: string
+  to: string
+  step: 'check' | 'remove' | 'install' | 'restore'
+  ok: boolean
+  application?: string
+  reason?: string
+  output?: string
+  logPath?: string
+  restore?: { ok: boolean, application?: string, reason?: string }
+  route: 'plugin-manager' | 'remove-and-install'
+}
+
 ;(() => {
   const loader = (window as unknown as DshWindow).__ModuleLoader__
   if (loader === undefined) return
@@ -126,6 +146,9 @@ interface VersionNotes {
       '.dpi-cardTop .dpi-head { flex: 1; min-width: 0; }',
       '.dpi-updateCopy { box-sizing: border-box; flex-shrink: 0; align-self: center; height: 28px; margin: 0 12px 0 0; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l3); border-radius: 14px; background: transparent; color: var(--dsw-alias-state-warn-label); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }',
       '.dpi-updateCopy:hover { background: var(--dsw-alias-interactive-bg-hover-solid); }',
+      '.dpi-updateCopy:disabled { opacity: 0.5; cursor: default; }',
+      '.dpi-primaryButton { border-color: var(--dsw-alias-state-success-primary); color: var(--dsw-alias-state-success-primary); }',
+      '.dpi-primaryButton:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); }',
       '.dpi-command { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); word-break: break-all; }',
       '.dpi-head { box-sizing: border-box; width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }',
       '.dpi-head:hover { background: var(--dsw-alias-interactive-bg-hover-solid); }',
@@ -271,6 +294,32 @@ interface VersionNotes {
       return date.toISOString().slice(0, 10)
     }
 
+    /** The step name an upgrade stopped at, in the page's words. */
+    const stepLabel = (step: UpdateOutcome['step']): string => {
+      if (step === 'remove') return '卸载旧版本'
+      if (step === 'install') return '安装新版本'
+      if (step === 'restore') return '恢复旧版本'
+      return '检查版本'
+    }
+
+    /** One upgrade answer as a sentence: what ran, where it stopped, and what the Host said. */
+    const updateText = (outcome: UpdateOutcome): string => {
+      const from = outcome.from === undefined ? '' : outcome.from + ' → '
+      const route = outcome.route === 'plugin-manager' ? '官方插件管理器' : '卸载后重装'
+      const head = (outcome.ok ? '升级成功：' : '升级失败：') + from + outcome.to + '（' + route + '）'
+      if (outcome.ok) {
+        const restart = outcome.application === 'restart-required' ? '，重启后生效' : ''
+        return head + restart
+      }
+      const detail = outcome.reason === undefined || outcome.reason === '' ? '' : '：' + outcome.reason
+      const restore = outcome.restore === undefined
+        ? ''
+        : outcome.restore.ok
+          ? '；已恢复 ' + (outcome.from ?? '原版本')
+          : '；恢复原版本也失败' + (outcome.restore.reason === undefined ? '' : '（' + outcome.restore.reason + '）')
+      return head + '（停在「' + stepLabel(outcome.step) + '」）' + detail + restore
+    }
+
     const PluginInfoPanel = (): unknown => {
       const [rows, setRows] = React.useState<PluginRow[] | null>(null)
       const [error, setError] = React.useState('')
@@ -283,6 +332,12 @@ interface VersionNotes {
       const [notesBusy, setNotesBusy] = React.useState('')
       const [copied, setCopied] = React.useState<Record<string, boolean>>({})
       const [profileCli, setProfileCli] = React.useState('web')
+      /** Plugin name whose upgrade is on the wire. */
+      const [updating, setUpdating] = React.useState('')
+      /** The last upgrade's answer per plugin. */
+      const [updateResults, setUpdateResults] = React.useState<Record<string, UpdateOutcome>>({})
+      /** The last upgrade's transport or refusal message per plugin. */
+      const [updateErrors, setUpdateErrors] = React.useState<Record<string, string>>({})
 
       const copyText = React.useCallback((key: string, text: string) => {
         const write = (): Promise<void> => {
@@ -357,6 +412,35 @@ interface VersionNotes {
           .finally(() => setNotesBusy(''))
       }, [notes])
 
+      /**
+       * Run one upgrade through the Host. The Host's own plugin manager does the
+       * work, so the answer carries the step it reached and the manager's words.
+       * @param name - plugin package name.
+       * @param version - the exact published version to install.
+       */
+      const runUpdate = React.useCallback((name: string, version: string) => {
+        if (updating !== '') return
+        setUpdating(name)
+        setUpdateErrors((prev) => ({ ...prev, [name]: '' }))
+        fetch(API + '/update', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name, version }),
+        })
+          .then(async (response) => {
+            const data = await response.json() as UpdateOutcome & { ok?: boolean, reason?: string, message?: string }
+            if (typeof data.name !== 'string' || typeof data.step !== 'string') {
+              // A refusal before the manager ran carries the service's own words in `message`.
+              throw new Error(data.message ?? data.reason ?? 'unexpected response')
+            }
+            setUpdateResults((prev) => ({ ...prev, [name]: data }))
+            if (data.ok) loadVersions(name)
+            load()
+          })
+          .catch((caught) => setUpdateErrors((prev) => ({ ...prev, [name]: String(caught instanceof Error ? caught.message : caught) })))
+          .finally(() => setUpdating(''))
+      }, [load, loadVersions, updating])
+
       if (rows === null) {
         return h('div', { className: 'dpi-section' }, h('div', { className: 'dpi-empty' }, '正在加载插件列表…'))
       }
@@ -364,7 +448,7 @@ interface VersionNotes {
       const updateCount = rows.filter((row) => row.hasUpdate).length
       const children: unknown[] = [
         h('h2', { key: 'title', className: 'dpi-title' }, '插件信息'),
-        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile（' + profileCli + '）里用户添加的插件（不含随发行版内置的 bundle）。有更新时可一键复制 dsh plugin 命令；展开后默认看最近 10 个版本，点版本可看更新说明。'),
+        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile（' + profileCli + '）里用户添加的插件（不含随发行版内置的 bundle）。有更新时可直接点「升级」，由 Host 的插件管理器执行（有官方 updateBundle 就用它，老运行时走卸载后重装并自动回滚）；也可以复制 dsh plugin 命令自己跑。展开后默认看最近 10 个版本，点版本可看更新说明。'),
         h('div', { key: 'toolbar', className: 'dpi-toolbar' },
           h('button', { className: 'dpi-secondaryButton', disabled: busy, onClick: () => { load() } }, busy ? '刷新中…' : '刷新'),
           h('span', { className: 'dpi-status' }, '共 ' + rows.length + ' 个插件' + (updateCount > 0 ? ' · ' + updateCount + ' 个可更新' : '')),
@@ -391,6 +475,13 @@ interface VersionNotes {
         const updateCommand = plugin.updateCommand
           ?? ('dsh plugin --profile ' + profileCli + ' add ' + plugin.name + '@latest')
         const updateCopied = copied['update:' + plugin.name] === true
+        const isUpdating = updating === plugin.name
+        const outcome = updateResults[plugin.name]
+        const updateError = updateErrors[plugin.name]
+        // The exact version the page offers: the registry's `latest`, or the
+        // release tag a GitHub-release spec resolves to.
+        const updateVersion = plugin.latestVersion
+        const canUpdate = plugin.hasUpdate && updateVersion !== undefined && plugin.source !== 'file' && plugin.source !== 'link'
         const body: unknown[] = []
         if (expanded) {
           if (plugin.description !== undefined) body.push(h('p', { key: 'desc', className: 'dpi-meta' }, plugin.description))
@@ -403,6 +494,15 @@ interface VersionNotes {
             body.push(h('p', { key: 'upd', className: 'dpi-command' }, updateCommand))
           }
           if (plugin.error !== undefined) body.push(h('p', { key: 'perr', className: 'dpi-banner' }, plugin.error))
+          if (outcome !== undefined) {
+            body.push(h('p', {
+              key: 'ures',
+              className: outcome.ok ? 'dpi-meta' : 'dpi-banner',
+            }, updateText(outcome)))
+          }
+          if (updateError !== undefined && updateError !== '') {
+            body.push(h('p', { key: 'uerr', className: 'dpi-banner' }, '升级请求失败：' + updateError))
+          }
           const links: unknown[] = [
             h('button', {
               key: 'copy',
@@ -416,9 +516,18 @@ interface VersionNotes {
               onClick: () => { loadVersions(plugin.name) },
             }, versions[plugin.name] === undefined ? '加载版本' : '重新加载版本'),
           ]
-          if (plugin.hasUpdate) {
+          if (canUpdate && updateVersion !== undefined) {
             links.push(h('button', {
               key: 'upd',
+              className: 'dpi-rowButton dpi-primaryButton',
+              title: '升级到 ' + updateVersion,
+              disabled: updating !== '',
+              onClick: () => { runUpdate(plugin.name, updateVersion) },
+            }, isUpdating ? '升级中…' : '升级到 ' + updateVersion))
+          }
+          if (plugin.hasUpdate) {
+            links.push(h('button', {
+              key: 'copyUpd',
               className: 'dpi-rowButton',
               title: updateCommand,
               onClick: () => { copyText('update:' + plugin.name, updateCommand) },
@@ -499,15 +608,16 @@ interface VersionNotes {
               'aria-expanded': expanded,
               onClick: () => { togglePlugin(plugin.name) },
             }, ...head),
-            plugin.hasUpdate
+            canUpdate && updateVersion !== undefined
               ? h('button', {
                 className: 'dpi-updateCopy',
-                title: updateCommand,
+                title: '升级到 ' + updateVersion,
+                disabled: updating !== '',
                 onClick: (event: { stopPropagation?: () => void }) => {
                   event.stopPropagation?.()
-                  copyText('update:' + plugin.name, updateCommand)
+                  runUpdate(plugin.name, updateVersion)
                 },
-              }, updateCopied ? '已复制' : '复制更新命令')
+              }, isUpdating ? '升级中…' : '升级')
               : null,
           ),
           expanded ? h('div', { className: 'dpi-body' }, ...body) : null,
