@@ -5,6 +5,7 @@ pnpm monorepo for DeepSeek Harness plugins.
 | Package | Description |
 |---|---|
 | [`@eya46/dsh-plugin-info`](packages/dsh-plugin-info) | Settings page for profile-added plugins, updates, and version notes |
+| [`@eya46/dsh-supermemory`](packages/dsh-supermemory) | Persistent Supermemory: profile, recall, turn capture, and browser OAuth |
 
 ## Install
 

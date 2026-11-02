@@ -1,0 +1,4 @@
+# Mount persistent Supermemory. API key or OAuth is configured at runtime.
+- insert:
+    - id: dsh-supermemory
+      name: '@eya46/dsh-supermemory'

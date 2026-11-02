@@ -4,6 +4,7 @@
 # machine running it. Add each package here when it lands.
 packages:
   - packages/dsh-plugin-info
+  - packages/dsh-supermemory
 
 # pnpm 11 rejects packages published within its supply-chain age window. These
 # plugins deliberately track DSH prereleases the moment they ship, so DeepSeek's
