@@ -1,7 +1,7 @@
 {
   "name": "@eya46/dsh-supermemory",
   "description": "Persistent Supermemory for DeepSeek Harness: profile injection, per-prompt recall, turn capture, and browser OAuth",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
