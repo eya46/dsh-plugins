@@ -448,7 +448,7 @@ interface UpdateOutcome {
       const updateCount = rows.filter((row) => row.hasUpdate).length
       const children: unknown[] = [
         h('h2', { key: 'title', className: 'dpi-title' }, '插件信息'),
-        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile（' + profileCli + '）里用户添加的插件（不含随发行版内置的 bundle）。有更新时可直接点「升级」，由 Host 的插件管理器执行（有官方 updateBundle 就用它，老运行时走卸载后重装并自动回滚）；也可以复制 dsh plugin 命令自己跑。展开后默认看最近 10 个版本，点版本可看更新说明。'),
+        h('p', { key: 'intro', className: 'dpi-intro' }, '当前 Profile（' + profileCli + '）里你添加的插件。有更新可直接升级；展开后看最近版本和更新说明。'),
         h('div', { key: 'toolbar', className: 'dpi-toolbar' },
           h('button', { className: 'dpi-secondaryButton', disabled: busy, onClick: () => { load() } }, busy ? '刷新中…' : '刷新'),
           h('span', { className: 'dpi-status' }, '共 ' + rows.length + ' 个插件' + (updateCount > 0 ? ' · ' + updateCount + ' 个可更新' : '')),
